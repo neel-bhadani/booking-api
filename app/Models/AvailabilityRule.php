@@ -13,7 +13,7 @@ class AvailabilityRule extends Model
         'room_id',
         'day_of_week',
         'opens_at',
-        'closes_at'
+        'closes_at',
     ];
 
     public function room()

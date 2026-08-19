@@ -24,7 +24,7 @@ class DatabaseSeeder extends Seeder
         //     'email' => 'test@example.com',
         // ]);
 
-        $user =  User::factory()->count(5)->create();
+        $user = User::factory()->count(5)->create();
 
         Room::factory()
             ->count(6)

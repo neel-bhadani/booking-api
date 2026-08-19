@@ -13,7 +13,6 @@ class Blackout extends Model
         'room_id',
         'starts_at',
         'ends_at',
-        'reason'
+        'reason',
     ];
-   
 }

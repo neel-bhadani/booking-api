@@ -18,8 +18,8 @@ class RoomFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => 'Room' . fake()->randomLetter(),
-            'location' => 'Floor' . fake()->numberBetween(1, 5),
+            'name' => 'Room'.fake()->randomLetter(),
+            'location' => 'Floor'.fake()->numberBetween(1, 5),
             'capacity' => fake()->numberBetween(6, 20),
             'is_active' => true,
         ];
