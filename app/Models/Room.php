@@ -16,7 +16,6 @@ class Room extends Model
         'is_active',
     ];
 
-
     public function availabilityRules()
     {
         return $this->hasMany(AvailabilityRule::class);

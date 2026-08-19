@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class Booking extends Model
 {
-
     use HasFactory;
 
     protected $table = 'bookings';
@@ -19,13 +18,14 @@ class Booking extends Model
         'ends_at',
         'status',
         'title',
-        'attendee_count'
+        'attendee_count',
     ];
 
     public function room()
     {
         return $this->belongsTo(Room::class);
     }
+
     public function user()
     {
         return $this->belongsTo(User::class);
