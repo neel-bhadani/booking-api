@@ -15,4 +15,12 @@ class Blackout extends Model
         'ends_at',
         'reason',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'starts_at' => 'datetime',
+            'ends_at' => 'datetime',
+        ];
+    }
 }

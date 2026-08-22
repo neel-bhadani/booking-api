@@ -21,6 +21,14 @@ class Booking extends Model
         'attendee_count',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'starts_at' => 'datetime',
+            'ends_at' => 'datetime',
+        ];
+    }
+
     public function room()
     {
         return $this->belongsTo(Room::class);
