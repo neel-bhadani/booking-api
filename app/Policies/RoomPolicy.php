@@ -36,7 +36,7 @@ class RoomPolicy
      */
     public function update(User $user, Room $room): bool
     {
-        return false;
+        return $user->role === 'admin';
     }
 
     /**

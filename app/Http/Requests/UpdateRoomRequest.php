@@ -24,6 +24,9 @@ class UpdateRoomRequest extends FormRequest
     {
         return [
             'name' => ['sometimes', 'string', 'max:255'],
+            'location' => ['sometimes', 'string', 'max:255'],
+            'capacity' => ['sometimes', 'integer', 'min:1'],
+            'is_active' => ['sometimes', 'boolean'],
         ];
     }
 }

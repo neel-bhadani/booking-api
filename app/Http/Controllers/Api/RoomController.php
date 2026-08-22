@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateRoomRequest;
 use App\Http\Resources\RoomResource;
 use App\Models\Room;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Http\Request;
 
 class RoomController extends Controller
 {
@@ -16,9 +17,14 @@ class RoomController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        return Room::paginate(15);
+        $rooms = Room::query()
+            ->when($request->capacity, fn ($q, $capacity) => $q->where('capacity', '>=', $capacity))
+            ->when($request->location, fn ($q, $location) => $q->where('location', $location))
+            ->paginate(15);
+
+        return RoomResource::collection($rooms);
     }
 
     /**
