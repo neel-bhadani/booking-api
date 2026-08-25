@@ -170,6 +170,21 @@ class BookingTest extends TestCase
         $this->assertDatabaseMissing('bookings', ['user_id' => $otherUser->id]);
     }
 
+    public function test_guest_cannot_create_booking(): void
+    {
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $day = now()->addDays(7);
+
+        $this->postJson('/api/bookings', $this->payload(
+            $room,
+            $day->copy()->setTime(11, 0),
+            $day->copy()->setTime(12, 0)
+        ))->assertStatus(401);
+
+        $this->assertDatabaseCount('bookings', 0);
+    }
+
     private function payload(Room $room, string $start, string $end): array
     {
         return [
