@@ -4,20 +4,31 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\UpdateBookingRequest;
 use App\Http\Resources\BookingResource;
 use App\Models\Booking;
 use App\Models\Room;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class BookingController extends Controller
 {
+    use AuthorizesRequests;
+
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        //
+        $bookings = $request->user()
+            ->bookings()
+            ->with('room')
+            ->when($request->upcoming, fn ($q) => $q->where('starts_at', '>', now()))
+            ->orderBy('starts_at')
+            ->paginate(15);
+
+        return BookingResource::collection($bookings);
     }
 
     /**
@@ -70,24 +81,62 @@ class BookingController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(string $id)
+    public function show(Booking $booking)
     {
-        //
+        $this->authorize('view', $booking);
+
+        $booking->load('room');
+
+        return new BookingResource($booking);
     }
 
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, string $id)
+    public function update(UpdateBookingRequest $request, Booking $booking)
     {
-        //
+        $this->authorize('update', $booking);
+
+        // Fall back to the stored values when a field isn't being changed,
+        // so the overlap check always has a complete time window.
+        $startsAt = $request->input('starts_at', $booking->starts_at);
+        $endsAt = $request->input('ends_at', $booking->ends_at);
+        $attendeeCount = $request->input('attendee_count', $booking->attendee_count);
+
+        if ($attendeeCount > $booking->room->capacity) {
+            return response()->json([
+                'message' => "This room holds {$booking->room->capacity} people.",
+            ], 422);
+        }
+
+        return DB::transaction(function () use ($request, $booking, $startsAt, $endsAt) {
+
+            $overlaps = Booking::where('room_id', $booking->room_id)
+                ->where('status', 'confirmed')
+                ->where('id', '!=', $booking->id)   // don't conflict with itself
+                ->where('starts_at', '<', $endsAt)
+                ->where('ends_at', '>', $startsAt)
+                ->lockForUpdate()
+                ->exists();
+
+            if ($overlaps) {
+                return response()->json([
+                    'message' => 'This room is already booked for that time.',
+                ], 409);
+            }
+
+            $booking->update($request->validated());
+
+            return new BookingResource($booking->fresh());
+        });
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
+    public function destroy(Booking $booking)
     {
-        //
+        $this->authorize('delete', $booking);
+
+        $booking->update(['status' => 'cancelled']);
+
+        return response()->noContent();
     }
 }

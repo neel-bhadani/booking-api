@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Booking;
 use App\Models\Room;
 use App\Models\User;
+use App\Services\AvailabilityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -194,5 +196,259 @@ class BookingTest extends TestCase
             'title' => 'Test meeting',
             'attendee_count' => 2,
         ];
+    }
+
+    public function test_user_cannot_view_another_users_booking()
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+
+        $this->actingAs($userA)->getJson("/api/bookings/{$booking->id}")->assertStatus(403);
+    }
+
+    public function test_user_cannot_update_another_users_booking()
+    {
+
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+
+        $this->actingAs($userA)->patchJson("/api/bookings/{$booking->id}", ['title' => 'Hijacked'])
+            ->assertStatus(403);
+    }
+
+    public function test_user_cannot_cancel_another_users_booking()
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+
+        $this->actingAs($userA)->deleteJson("/api/bookings/{$booking->id}", ['status' => 'cancelled'])
+            ->assertStatus(403);
+    }
+
+    public function test_admin_can_cancel_another_users_booking()
+    {
+        $admin = User::factory()->admin()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+
+        $this->actingAs($admin)->deleteJson("/api/bookings/{$booking->id}", ['status' => 'cancelled'])
+            ->assertStatus(204);
+    }
+
+    public function test_admin_cannot_update_another_users_booking()
+    {
+        $admin = User::factory()->admin()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+
+        $this->actingAs($admin)->patchJson("/api/bookings/{$booking->id}", ['title' => 'Hijacked'])
+            ->assertStatus(403);
+    }
+
+    public function test_index_returns_only_own_bookings()
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $bookingA = Booking::factory()->count(2)->create([
+            'user_id' => $userA->id,
+            'room_id' => $room->id,
+        ]);
+        $bookingB = Booking::factory()->create([
+            'user_id' => $userB->id,
+            'room_id' => $room->id,
+        ]);
+        $this->actingAs($userA)
+            ->getJson('/api/bookings')
+            ->assertStatus(200)
+            ->assertJsonCount(2, 'data')
+            ->assertJsonMissing(['id' => $bookingB->id]);
+    }
+
+    public function test_cancel_sets_status_and_keeps_the_row()
+    {
+        // Arrange — a booking that belongs to this user
+        $user = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+        $booking = Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+        ]);
+
+        // Act — cancel it
+        $this->actingAs($user)
+            ->deleteJson("/api/bookings/{$booking->id}")
+            ->assertStatus(204);
+
+        // Assert — the row is STILL THERE, with the new status
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'status' => 'cancelled',
+        ]);
+    }
+
+    public function test_cancelled_booking_frees_the_slot(): void
+    {
+        $date = now()->addDays(7)->setTime(0, 0);
+
+        $user = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $room->availabilityRules()->create([
+            'day_of_week' => $date->dayOfWeek,
+            'opens_at' => '09:00',
+            'closes_at' => '18:00',
+        ]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+            'starts_at' => $date->copy()->setTime(11, 0),
+            'ends_at' => $date->copy()->setTime(12, 0),
+            'status' => 'confirmed',
+        ]);
+
+        // Before: the booking splits the day in two
+        $this->assertEquals(
+            ['09:00-11:00', '12:00-18:00'],
+            $this->freeSlots($room, $date)
+        );
+
+        $this->actingAs($user)
+            ->deleteJson("/api/bookings/{$booking->id}")
+            ->assertStatus(204);
+
+        // After: the slot is bookable again, with no extra logic —
+        // AvailabilityService filters on status = confirmed.
+        $this->assertEquals(
+            ['09:00-18:00'],
+            $this->freeSlots($room, $date)
+        );
+    }
+
+    private function freeSlots(Room $room, $date): array
+    {
+        return collect((new AvailabilityService)->getFreeSlots($room, $date))
+            ->map(fn ($s) => $s['start']->format('H:i').'-'.$s['end']->format('H:i'))
+            ->all();
+    }
+
+    public function test_updating_only_the_title_succeeds(): void
+    {
+        $date = now()->addDays(7);
+
+        $user = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+            'starts_at' => $date->copy()->setTime(11, 0),
+            'ends_at' => $date->copy()->setTime(12, 0),
+            'status' => 'confirmed',
+        ]);
+
+        $this->actingAs($user)
+            ->patchJson("/api/bookings/{$booking->id}", ['title' => 'Renamed'])
+            ->assertStatus(200);
+
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'title' => 'Renamed',
+        ]);
+    }
+
+    public function test_rescheduling_to_a_free_slot_succeeds(): void
+    {
+        $date = now()->addDays(7);
+
+        $user = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $booking = Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+            'starts_at' => $date->copy()->setTime(11, 0),
+            'ends_at' => $date->copy()->setTime(12, 0),
+            'status' => 'confirmed',
+        ]);
+
+        $this->actingAs($user)
+            ->patchJson("/api/bookings/{$booking->id}", [
+                'starts_at' => $date->copy()->setTime(14, 0)->toDateTimeString(),
+                'ends_at' => $date->copy()->setTime(15, 0)->toDateTimeString(),
+            ])
+            ->assertStatus(200);
+
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'starts_at' => $date->copy()->setTime(14, 0)->toDateTimeString(),
+        ]);
+    }
+
+    public function test_rescheduling_onto_another_booking_is_rejected(): void
+    {
+        $date = now()->addDays(7);
+
+        $user = User::factory()->create();
+        $room = Room::factory()->create(['capacity' => 10]);
+
+        $mine = Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+            'starts_at' => $date->copy()->setTime(11, 0),
+            'ends_at' => $date->copy()->setTime(12, 0),
+            'status' => 'confirmed',
+        ]);
+
+        Booking::factory()->create([
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+            'starts_at' => $date->copy()->setTime(15, 0),
+            'ends_at' => $date->copy()->setTime(16, 0),
+            'status' => 'confirmed',
+        ]);
+
+        $this->actingAs($user)
+            ->patchJson("/api/bookings/{$mine->id}", [
+                'starts_at' => $date->copy()->setTime(15, 0)->toDateTimeString(),
+                'ends_at' => $date->copy()->setTime(16, 0)->toDateTimeString(),
+            ])
+            ->assertStatus(409);
+
+        // Original times unchanged
+        $this->assertDatabaseHas('bookings', [
+            'id' => $mine->id,
+            'starts_at' => $date->copy()->setTime(11, 0)->toDateTimeString(),
+        ]);
     }
 }
